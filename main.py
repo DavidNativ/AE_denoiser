@@ -2,6 +2,7 @@
 # source: https://github.com/saurabhkemekar
 # pytorch, MNIST
 
+import clearml
 import torch
 import torch.nn as nn
 import torchvision
@@ -10,6 +11,7 @@ from torch.utils.data import Dataset ,DataLoader
 import matplotlib.pyplot as plt
 import numpy as np
 
+#in order to avoid a weird DLL error
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
@@ -114,107 +116,110 @@ def test(model, device, test_loader):
 
 #############
 
+if __name__ == "__main__" :
+    # Setting Hyperparameters
+    batch_size = 128
+    learning_rate = 0.01
+    num_epoch = 4
 
-# Setting Hyperparameters
-batch_size = 128
-learning_rate = 0.01
-num_epoch = 4
+    #saving the model each ...
+    milestone = 3
 
-###
-print("Creating Datasets")
-train_dataset = torchvision.datasets.MNIST(root= './data' ,train = True ,transform= transforms.ToTensor() ,download=True)
-test_dataset = torchvision.datasets.MNIST(root= './data' ,train = False ,transform= transforms.ToTensor() ,download=True)
+    ###
+    print("Creating Datasets")
+    train_dataset = torchvision.datasets.MNIST(root= './data' ,train = True ,transform= transforms.ToTensor() ,download=True)
+    test_dataset = torchvision.datasets.MNIST(root= './data' ,train = False ,transform= transforms.ToTensor() ,download=True)
 
-print("Adding Noise")
-noise_train_dataset = np.zeros((len(train_dataset) ,1 ,28 ,28))
-noise_test_dataset = np.zeros((len(test_dataset) ,1 ,28 ,28))
+    print("Adding Noise")
+    noise_train_dataset = np.zeros((len(train_dataset) ,1 ,28 ,28))
+    noise_test_dataset = np.zeros((len(test_dataset) ,1 ,28 ,28))
 
-for i in range(len(train_dataset)):
-    if i < len(train_dataset )//2:
-        noise_train_dataset[i][0] = gaussian_noise(train_dataset[i][0][0])
-    else:
-        noise_train_dataset[i][0] = speckle_noise(train_dataset[i][0][0])
+    for i in range(len(train_dataset)):
+        if i < len(train_dataset )//2:
+            noise_train_dataset[i][0] = gaussian_noise(train_dataset[i][0][0])
+        else:
+            noise_train_dataset[i][0] = speckle_noise(train_dataset[i][0][0])
 
-for i in range(len(test_dataset)):
-    if i < len(test_dataset )//2:
-        noise_test_dataset[i][0] = gaussian_noise(test_dataset[i][0][0])
-    else:
-        noise_test_dataset[i][0] = speckle_noise(test_dataset[i][0][0])
-
-
-print("Plotting noised images")
-img = train_dataset[0][0][0]
-
-plt.subplot(1 ,3 ,1)
-plt.imshow(img ,cmap = "gray")
-plt.title("Original Image")
-noise_img = gaussian_noise(img)
-noise_img2 = speckle_noise(img)
-
-plt.subplot(1 ,3 ,2)
-plt.title("Gaussian Noise Image")
-plt.imshow(noise_img ,cmap = "gray")
-
-plt.subplot(1 ,3 ,3)
-plt.title("Speckle Noise Image")
-plt.imshow(noise_img2 ,cmap = "gray")\
-
-plt.show()
+    for i in range(len(test_dataset)):
+        if i < len(test_dataset )//2:
+            noise_test_dataset[i][0] = gaussian_noise(test_dataset[i][0][0])
+        else:
+            noise_test_dataset[i][0] = speckle_noise(test_dataset[i][0][0])
 
 
+    print("Plotting noised images")
+    img = train_dataset[0][0][0]
 
-train_set = MNIST_dataset(noise_train_dataset,train_dataset)
-test_set = MNIST_dataset(noise_test_dataset,test_dataset)
+    plt.subplot(1 ,3 ,1)
+    plt.imshow(img ,cmap = "gray")
+    plt.title("Original Image")
+    noise_img = gaussian_noise(img)
+    noise_img2 = speckle_noise(img)
 
-train_loader = DataLoader(train_set,batch_size =batch_size,shuffle=True)
-test_loader = DataLoader(test_set,batch_size =batch_size,shuffle=True)
+    plt.subplot(1 ,3 ,2)
+    plt.title("Gaussian Noise Image")
+    plt.imshow(noise_img ,cmap = "gray")
 
-img,label = iter(test_loader).next()
-print(img.shape,label.shape)
+    plt.subplot(1 ,3 ,3)
+    plt.title("Speckle Noise Image")
+    plt.imshow(noise_img2 ,cmap = "gray")\
 
-torch.Size([128, 1, 28, 28])
-torch.Size([128, 1, 28, 28])
+    plt.show()
 
 
 
-model = denoising_model()
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model.to(device)
-# Loss and optimizer
-criterion = nn.MSELoss()
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    train_set = MNIST_dataset(noise_train_dataset,train_dataset)
+    test_set = MNIST_dataset(noise_test_dataset,test_dataset)
 
-schedular = optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
-print("training Model")
-for epoch in range(num_epoch):
-    train(model, device, train_loader, criterion, optimizer, epoch)
-    schedular.step()
-    test(model, device, test_loader)
-    if epoch % 3 == 0:
-        torch.save(model.state_dict(), 'seg_model.pth')
+    train_loader = DataLoader(train_set,batch_size =batch_size,shuffle=True)
+    test_loader = DataLoader(test_set,batch_size =batch_size,shuffle=True)
 
-#torch.load(model.state_dict(), 'seg_model.pth')
-model.load_state_dict(torch.load('seg_model.pth'))
+    img,label = iter(test_loader).next()
+    print(img.shape,label.shape)
 
-img, label = iter(train_loader).next()
-img1 = img[0].view(img[0].shape[0], -1).float()
-print(img1.shape)
-predict = model(img1.to(device))
-label = label[0][0].detach().numpy()
+    torch.Size([128, 1, 28, 28])
+    torch.Size([128, 1, 28, 28])
 
-torch.Size([1, 784])
 
-predict_img = predict.view(1, 28, 28).detach().cpu().numpy()
 
-plt.subplot(1, 3, 1)
-plt.imshow(img[0][0], cmap="gray")
-plt.title("Noisy Image")
-plt.subplot(1, 3, 2)
-plt.imshow(label, cmap="gray")
-plt.title("Original Image")
-plt.subplot(1, 3, 3)
-plt.imshow(predict_img[0], cmap="gray")
-plt.title("Predicted Image")
+    model = denoising_model()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    # Loss and optimizer
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-plt.show()
+    schedular = optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
+    print("training Model")
+    for epoch in range(num_epoch):
+        train(model, device, train_loader, criterion, optimizer, epoch)
+        schedular.step()
+        test(model, device, test_loader)
+        if epoch % milestone == 0:
+            torch.save(model.state_dict(), 'seg_model.pth')
+
+    #torch.load(model.state_dict(), 'seg_model.pth')
+    model.load_state_dict(torch.load('seg_model.pth'))
+
+    img, label = iter(train_loader).next()
+    img1 = img[0].view(img[0].shape[0], -1).float()
+    print(img1.shape)
+    predict = model(img1.to(device))
+    label = label[0][0].detach().numpy()
+
+    torch.Size([1, 784])
+
+    predict_img = predict.view(1, 28, 28).detach().cpu().numpy()
+
+    plt.subplot(1, 3, 1)
+    plt.imshow(img[0][0], cmap="gray")
+    plt.title("Noisy Image")
+    plt.subplot(1, 3, 2)
+    plt.imshow(label, cmap="gray")
+    plt.title("Original Image")
+    plt.subplot(1, 3, 3)
+    plt.imshow(predict_img[0], cmap="gray")
+    plt.title("Predicted Image")
+
+    plt.show()
 
