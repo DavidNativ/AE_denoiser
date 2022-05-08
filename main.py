@@ -2,7 +2,7 @@
 # source: https://github.com/saurabhkemekar
 # pytorch, MNIST
 
-import clearml
+from clearml import Task
 import torch
 import torch.nn as nn
 import torchvision
