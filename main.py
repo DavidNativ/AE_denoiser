@@ -3,20 +3,23 @@
 # pytorch, MNIST
 
 from clearml import Task
+import argparse
+
 import torch
 import torch.nn as nn
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset ,DataLoader
+
 import matplotlib.pyplot as plt
 import numpy as np
-
-#in order to avoid a weird DLL error
-import os
-os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
-
 import torch.optim as optim  # For all Optimization algorithms, SGD, Adam, etc.
 import torch.nn.functional as F   # All functions that don't have any parameters
+
+
+### in order to avoid a weird DLL error...
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
 ########### add noise helper functions ############
 def gaussian_noise(img):
@@ -117,13 +120,29 @@ def test(model, device, test_loader):
 #############
 
 if __name__ == "__main__" :
-    # Setting Hyperparameters
-    batch_size = 128
-    learning_rate = 0.01
-    num_epoch = 4
+    #Clear ML integration
+    task = Task.init(project_name='01_AE_MNIST_torch', task_name='02 adding parameters')
 
+    # Setting Hyperparameters through a dict ....
+    hyper_param_dict = {
+        "batch_size": 128,
+        "learning_rate": 0.01,
+        "milestone": 3
+    }
+    task.connect(hyper_param_dict)
+
+    # setting another HP through arg parser
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--epochs', type=int, required=False, help='Number of training epochs', default=4)
+    args = parser.parse_args()
+
+    #retrieving args for easier code
+    num_epochs = args.epochs
+    batch_size = hyper_param_dict["batch_size"]
+    learning_rate = hyper_param_dict["learning_rate"]
     #saving the model each ...
-    milestone = 3
+    milestone = hyper_param_dict["milestone"]
+
 
     ###
     print("Creating Datasets")
@@ -191,7 +210,7 @@ if __name__ == "__main__" :
 
     schedular = optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
     print("training Model")
-    for epoch in range(num_epoch):
+    for epoch in range(num_epochs):
         train(model, device, train_loader, criterion, optimizer, epoch)
         schedular.step()
         test(model, device, test_loader)
