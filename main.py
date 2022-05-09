@@ -218,7 +218,7 @@ if __name__ == "__main__" :
             d = time.strftime("%Y,%m,%d,_%H,%M,%S")
             t = d.split(',')
             today = ''.join(t)
-            filename = f"Model_{today}_{epoch}_{num_epochs}.pth"
+            filename = f".\MODELS\Model_{today}_{epoch}_{num_epochs}.pth"
             torch.save(model.state_dict(), filename)
 
     #model.load_state_dict(torch.load('seg_model.pth'))
