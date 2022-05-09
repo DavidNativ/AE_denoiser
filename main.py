@@ -11,6 +11,7 @@ import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset ,DataLoader
 
+import time
 import matplotlib.pyplot as plt
 import numpy as np
 import torch.optim as optim  # For all Optimization algorithms, SGD, Adam, etc.
@@ -185,8 +186,7 @@ if __name__ == "__main__" :
 
     plt.show()
 
-
-
+    print("Training")
     train_set = MNIST_dataset(noise_train_dataset,train_dataset)
     test_set = MNIST_dataset(noise_test_dataset,test_dataset)
 
@@ -199,26 +199,29 @@ if __name__ == "__main__" :
     torch.Size([128, 1, 28, 28])
     torch.Size([128, 1, 28, 28])
 
-
-
     model = denoising_model()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
+
     # Loss and optimizer
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     schedular = optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
-    print("training Model")
+
     for epoch in range(num_epochs):
         train(model, device, train_loader, criterion, optimizer, epoch)
         schedular.step()
         test(model, device, test_loader)
         if epoch % milestone == 0:
-            torch.save(model.state_dict(), 'seg_model.pth')
+            # Save Model
+            d = time.strftime("%Y,%m,%d,_%H,%M,%S")
+            t = d.split(',')
+            today = ''.join(t)
+            filename = f"Model_{today}_{epoch}_{num_epochs}.pth"
+            torch.save(model.state_dict(), filename)
 
-    #torch.load(model.state_dict(), 'seg_model.pth')
-    model.load_state_dict(torch.load('seg_model.pth'))
+    #model.load_state_dict(torch.load('seg_model.pth'))
 
     img, label = iter(train_loader).next()
     img1 = img[0].view(img[0].shape[0], -1).float()
