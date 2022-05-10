@@ -3,6 +3,8 @@
 # pytorch, MNIST
 
 from clearml import Task
+from clearml import Logger
+
 import argparse
 
 import torch
@@ -87,7 +89,9 @@ class denoising_model(nn.Module):
 
 
 def train(model,device,train_loader,criterion, optimizer,epoch):
+    #specify to the model that we are training it
     model.train()
+    mean_loss = 0
     for i , (data, targets) in enumerate(train_loader):
         data, targets = data.view(data.shape[0], -1).float(), targets.view(targets.shape[0], -1).float()
         data, targets = data.to(device), targets.to(device)
@@ -96,13 +100,23 @@ def train(model,device,train_loader,criterion, optimizer,epoch):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        mean_loss += loss.item()
+
+
         if i % 2000 == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(epoch, i * len(data),
                                                                            len(train_loader.dataset),
-                                                                           100. * i / len(train_loader), loss.item()))
-
+                                                                               100. * i / len(train_loader), loss.item()))
+    # logging current loss
+    Logger.current_logger().report_scalar(
+        'loss metrics',
+        'training loss',
+        iteration=epoch,
+        value=mean_loss/len(train_loader.dataset)
+    )
 
 def test(model, device, test_loader):
+    # specify to the model that we are testing it
     model.eval()
     test_loss = 0
     correct = 0
@@ -116,19 +130,47 @@ def test(model, device, test_loader):
             # correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(test_loader.dataset)
+
+    # logging test loss
+    Logger.current_logger().report_scalar(
+        'loss metrics',
+        'test loss',
+        iteration=epoch,
+        value=test_loss.item()
+    )
+
     print('\nTest set: Average loss: {:.4f}'.format(test_loss, correct))
+
+def plot_noised_img(img, plt):
+    print("Plotting noised images")
+
+    plt.subplot(1, 3, 1)
+    plt.imshow(img, cmap="gray")
+    plt.title("Original Image")
+    noise_img = gaussian_noise(img)
+    noise_img2 = speckle_noise(img)
+
+    plt.subplot(1, 3, 2)
+    plt.title("Gaussian Noise Image")
+    plt.imshow(noise_img, cmap="gray")
+
+    plt.subplot(1, 3, 3)
+    plt.title("Speckle Noise Image")
+    plt.imshow(noise_img2, cmap="gray")
+    plt.show()
+
 
 #############
 
 if __name__ == "__main__" :
     #Clear ML integration
-    task = Task.init(project_name='01_AE_MNIST_torch', task_name='02 adding parameters')
+    task = Task.init(project_name='01_AE_MNIST_torch', task_name='04 HPO')
 
     # Setting Hyperparameters through a dict ....
     hyper_param_dict = {
         "batch_size": 128,
         "learning_rate": 0.01,
-        "milestone": 3
+        "checkpoint": 3
     }
     task.connect(hyper_param_dict)
 
@@ -142,11 +184,11 @@ if __name__ == "__main__" :
     batch_size = hyper_param_dict["batch_size"]
     learning_rate = hyper_param_dict["learning_rate"]
     #saving the model each ...
-    milestone = hyper_param_dict["milestone"]
+    checkpoint = hyper_param_dict["checkpoint"]
 
 
     ###
-    print("Creating Datasets")
+    print("Creating Dataset")
     train_dataset = torchvision.datasets.MNIST(root= './data' ,train = True ,transform= transforms.ToTensor() ,download=True)
     test_dataset = torchvision.datasets.MNIST(root= './data' ,train = False ,transform= transforms.ToTensor() ,download=True)
 
@@ -166,25 +208,9 @@ if __name__ == "__main__" :
         else:
             noise_test_dataset[i][0] = speckle_noise(test_dataset[i][0][0])
 
-
-    print("Plotting noised images")
     img = train_dataset[0][0][0]
+    plot_noised_img(img, plt)
 
-    plt.subplot(1 ,3 ,1)
-    plt.imshow(img ,cmap = "gray")
-    plt.title("Original Image")
-    noise_img = gaussian_noise(img)
-    noise_img2 = speckle_noise(img)
-
-    plt.subplot(1 ,3 ,2)
-    plt.title("Gaussian Noise Image")
-    plt.imshow(noise_img ,cmap = "gray")
-
-    plt.subplot(1 ,3 ,3)
-    plt.title("Speckle Noise Image")
-    plt.imshow(noise_img2 ,cmap = "gray")\
-
-    plt.show()
 
     print("Training")
     train_set = MNIST_dataset(noise_train_dataset,train_dataset)
@@ -213,15 +239,13 @@ if __name__ == "__main__" :
         train(model, device, train_loader, criterion, optimizer, epoch)
         schedular.step()
         test(model, device, test_loader)
-        if epoch % milestone == 0:
+        if epoch % checkpoint == 0:
             # Save Model
             d = time.strftime("%Y,%m,%d,_%H,%M,%S")
             t = d.split(',')
             today = ''.join(t)
             filename = f".\MODELS\Model_{today}_{epoch}_{num_epochs}.pth"
             torch.save(model.state_dict(), filename)
-
-    #model.load_state_dict(torch.load('seg_model.pth'))
 
     img, label = iter(train_loader).next()
     img1 = img[0].view(img[0].shape[0], -1).float()
@@ -243,5 +267,5 @@ if __name__ == "__main__" :
     plt.imshow(predict_img[0], cmap="gray")
     plt.title("Predicted Image")
 
-    plt.show()
+    #plt.show()
 
