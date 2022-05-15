@@ -1,178 +1,176 @@
-# denoising autoencoder
-# source: https://github.com/saurabhkemekar
-# pytorch, MNIST
+import copy
 
-from clearml import Task
-from clearml import Logger
+CLEARML = False
 
+if CLEARML:
+    from clearml import Task, Logger
+    from clearml import Dataset as cML_DS
+
+import random
 import argparse
+from denoising_model import denoising_model
+
 
 import torch
 import torch.nn as nn
-import torchvision
+from torchvision.datasets import MNIST
 import torchvision.transforms as transforms
-from torch.utils.data import Dataset ,DataLoader
+from torch.utils.data import Dataset, DataLoader
 
 import time
 import matplotlib.pyplot as plt
 import numpy as np
 import torch.optim as optim  # For all Optimization algorithms, SGD, Adam, etc.
-import torch.nn.functional as F   # All functions that don't have any parameters
 
 
 ### in order to avoid a weird DLL error...
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
-########### add noise helper functions ############
-def gaussian_noise(img):
-    sigma = 0.1
-    mu = 0
-    noise = np.random.normal(mu ,sigma ,img.shape)
-    return img + noise
 
-def speckle_noise(img):
-    row ,col = img.shape
-    noise = np.random.rand(row ,col)
-    return img + noise
-###################################
-
-############### Classes
-class MNIST_dataset(Dataset):
-    def __init__(self,input,label,transform =None):
-        self.input = input
-        self.label = label
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.input)
-
-    def __getitem__(self,indx):
-        # print(self.input.shape,self.)
-        img = self.input[indx]
-        label = self.label[indx][0]
-
-        if self.transform:
-            img = self.transform(img)
-            label= self.transform(label)
-        return img,label
-
-
-class denoising_model(nn.Module):
-    def __init__(self):
-        super(denoising_model,self).__init__()
-        self.encoder= nn.Sequential(
-            nn.Linear(28* 28,256),
-            nn.ReLU(True),
-            nn.Linear(256,128),
-            nn.ReLU(True),
-            nn.Linear(128,64),
-            nn.ReLU(True)
-
-        )
-
-        self.decoder= nn.Sequential(
-            nn.Linear(64,128),
-            nn.ReLU(True),
-            nn.Linear(128,256),
-            nn.ReLU(True),
-            nn.Linear(256,28* 28),
-            nn.Sigmoid(),
-        )
-
-    def forward(self,x ):
-        x= self.encoder(x)
-        x= self.decoder(x)
-
-        return x
-
-
-
-def train(model,device,train_loader,criterion, optimizer,epoch):
-    #specify to the model that we are training it
-    model.train()
+def train(model,device,train_loader,criterion, optimizer, epoch, std, mean):
+    #model.train()
     mean_loss = 0
-    for i , (data, targets) in enumerate(train_loader):
-        data, targets = data.view(data.shape[0], -1).float(), targets.view(targets.shape[0], -1).float()
-        data, targets = data.to(device), targets.to(device)
-        outputs = model(data)
-        loss = criterion(outputs, targets)
+    for i, (targets, _) in enumerate(train_loader):
+        #adding noise
+        noisy_data = copy.deepcopy(targets)
+        for k, (d) in enumerate(noisy_data):
+            noisy_data[k] = add_noise(d, std, mean)
+
         optimizer.zero_grad()
+        outputs = model(noisy_data.view(noisy_data.shape[0], -1))
+        e1 = outputs.view(outputs.shape[0], -1)
+        e2 = targets.view(targets.shape[0], -1)
+        loss = criterion(e1,e2)
         loss.backward()
         optimizer.step()
+
         mean_loss += loss.item()
 
+        # # show some samples
+        # nb = 6
+        # fig, ax = plt.subplots(nrows=nb, ncols=2, squeeze=True)#, sharex=True, sharey=True, squeeze=True)
+        # for i in range(nb):
+        #     #random indice
+        #     r = random.randint(0, batch_size-1)
+        #     img = targets[r].detach().numpy()
+        #     noisy = data[r].detach().numpy()
+        #     ax[i][0].imshow(img.reshape((28,28)))
+        #     ax[i][1].imshow(noisy.reshape((28,28)))
+        #     ax[i][0].axis('off')
+        #     ax[i][1].axis('off')
+        # plt.show()
 
-        if i % 2000 == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(epoch, i * len(data),
-                                                                           len(train_loader.dataset),
-                                                                               100. * i / len(train_loader), loss.item()))
-    # logging current loss
-    Logger.current_logger().report_scalar(
-        'loss metrics',
-        'training loss',
-        iteration=epoch,
-        value=mean_loss/len(train_loader.dataset)
-    )
+        # optimizer.zero_grad()
+        # outputs = model(data)
+        # loss = criterion(outputs, targets)
+        # loss.backward()
+        # optimizer.step()
+        #
+        # mean_loss += loss.item()
+        # if i % 20 == 0:
+        #     print(f'Loss {loss.item()}')
 
-def test(model, device, test_loader):
-    # specify to the model that we are testing it
-    model.eval()
-    test_loss = 0
-    correct = 0
+    mean_loss /= len(train_loader)
+    print(f"Mean Loss on epoch {epoch} : {mean_loss}")
+
+      #     if i % 2000 == 0:
+    #         print(f'Train Epoch: {epoch} [{i * len(data)}/{len(train_loader.dataset)} ({ 100. * i / len(train_loader):.0f}%)]\tLoss: {loss.item():.6f}')
+    #
+    # mean_loss /= len(train_loader)
+    # # logging current loss
+    # if CLEARML:
+    #     Logger.current_logger().report_scalar(
+    #         'loss metrics',
+    #         'training loss',
+    #         iteration=epoch,
+    #         value=mean_loss
+    #     )
+    return mean_loss
+
+def test(model,device,test_loader, epoch, std, mean):
+    #model.eval()
+    mean_loss = 0
+    accuracy = 0
+    print(f"Testing epoch {epoch}")
     with torch.no_grad():
-        for data, target in test_loader:
-            data, target = data.to(device), target.to(device)
-            data, target = data.view(data.shape[0], -1).float(), target.view(target.shape[0], -1).float()
-            output = model(data)
-            test_loss += criterion(output, target)  # sum up batch loss
-            pred = output.max(1, keepdim=True)[1]  # get the index of the max log-probability
-            # correct += pred.eq(target.view_as(pred)).sum().item()
+        for i, (targets, _) in enumerate(test_loader):
+            # adding noise
+            noisy_data = copy.deepcopy(targets)
+            for k, (d) in enumerate(noisy_data):
+                noisy_data[k] = add_noise(d, std, mean)
 
-    test_loss /= len(test_loader.dataset)
+            noisy_data = noisy_data.view(noisy_data.shape[0],-1)
+            targets = targets.view(targets.shape[0], -1)
+            outputs = model(noisy_data).view(targets.shape[0], -1)
+            loss = criterion(outputs, targets)
+            mean_loss += loss.item()
 
-    # logging test loss
-    Logger.current_logger().report_scalar(
-        'loss metrics',
-        'test loss',
-        iteration=epoch,
-        value=test_loss.item()
-    )
+            # show some samples
+            nb = 6
+            fig, ax = plt.subplots(nrows=nb, ncols=3, sharex=True, sharey=True, squeeze=True)
+            for i in range(nb):
+                # random indice
+                r = random.randint(0, noisy_data.shape[0] - 1)
+                orig = targets[r].view(28, 28).numpy()
+                noisy = noisy_data[r].view(28, 28).numpy()
+                decoded = outputs[r].view(28, 28).numpy()
 
-    print('\nTest set: Average loss: {:.4f}'.format(test_loss, correct))
+                ax[i][0].imshow(orig.squeeze())
+                ax[i][0].axis('off')
+                ax[i][1].imshow(noisy.squeeze())
+                ax[i][1].axis('off')
+                ax[i][2].imshow(decoded.squeeze())
+                ax[i][2].axis('off')
+            plt.show()
+            break
 
-def plot_noised_img(img, plt):
-    print("Plotting noised images")
+        mean_loss /= len(train_loader)
+        print(f"Mean Loss on epoch {epoch} : {mean_loss}")
 
-    plt.subplot(1, 3, 1)
-    plt.imshow(img, cmap="gray")
-    plt.title("Original Image")
-    noise_img = gaussian_noise(img)
-    noise_img2 = speckle_noise(img)
+          #     if i % 2000 == 0:
+        #         print(f'Train Epoch: {epoch} [{i * len(data)}/{len(train_loader.dataset)} ({ 100. * i / len(train_loader):.0f}%)]\tLoss: {loss.item():.6f}')
+        #
+        # mean_loss /= len(train_loader)
+        # # logging current loss
+        # if CLEARML:
+        #     Logger.current_logger().report_scalar(
+        #         'loss metrics',
+        #         'training loss',
+        #         iteration=epoch,
+        #         value=mean_loss
+        #     )
+        return mean_loss
 
-    plt.subplot(1, 3, 2)
-    plt.title("Gaussian Noise Image")
-    plt.imshow(noise_img, cmap="gray")
 
-    plt.subplot(1, 3, 3)
-    plt.title("Speckle Noise Image")
-    plt.imshow(noise_img2, cmap="gray")
-    plt.show()
+def add_noise(tensor, std, mean):
+        #gaussian noise
+        return tensor + torch.randn(tensor.size()) * std + mean
 
 
-#############
+if __name__ == "__main__":
+    print("MNIST Denoiser AutoEncoder")
 
-if __name__ == "__main__" :
-    #Clear ML integration
-    task = Task.init(project_name='01_AE_MNIST_torch', task_name='04 HPO')
+    #transforming the dataset
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        #transforms.Normalize((0.1307,), (0.3081,))
+        #,transforms.RandomApply([AddGaussianNoise(mean, std)], p=0.5)
+    ])
 
+    # Clear ML integration
+    if CLEARML:
+        task = Task.init(project_name='02_AE_MNIST_denoiser', task_name='01')
+
+    ##### args
     # Setting Hyperparameters through a dict ....
     hyper_param_dict = {
         "batch_size": 128,
         "learning_rate": 0.01,
         "checkpoint": 3
     }
-    task.connect(hyper_param_dict)
+    if CLEARML:
+        task.connect(hyper_param_dict)
 
     # setting another HP through arg parser
     parser = argparse.ArgumentParser()
@@ -186,45 +184,35 @@ if __name__ == "__main__" :
     #saving the model each ...
     checkpoint = hyper_param_dict["checkpoint"]
 
+    std = 1.
+    mean = 0.
 
-    ###
-    print("Creating Dataset")
-    train_dataset = torchvision.datasets.MNIST(root= './data' ,train = True ,transform= transforms.ToTensor() ,download=True)
-    test_dataset = torchvision.datasets.MNIST(root= './data' ,train = False ,transform= transforms.ToTensor() ,download=True)
+    #### datasets & dataloaders
+    #preparing the datasets
+    train_dataset = MNIST('./data', train=True, download=True, transform=transform)
+    test_dataset = MNIST('./data', train=False, download=True, transform=transform),
 
-    print("Adding Noise")
-    noise_train_dataset = np.zeros((len(train_dataset) ,1 ,28 ,28))
-    noise_test_dataset = np.zeros((len(test_dataset) ,1 ,28 ,28))
+    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    test_loader = DataLoader(dataset=test_dataset[0], batch_size=batch_size, shuffle=True, drop_last=True)
 
-    for i in range(len(train_dataset)):
-        if i < len(train_dataset )//2:
-            noise_train_dataset[i][0] = gaussian_noise(train_dataset[i][0][0])
-        else:
-            noise_train_dataset[i][0] = speckle_noise(train_dataset[i][0][0])
+    #showing some samples
+    # fig, ax = plt.subplots(nrows=8, ncols=8, sharex=True, sharey=True, squeeze=True)
+    # for i in range(8):
+    #     for j in range(8):
+    #         #random indice
+    #         r = random.randint(0, len(train_dataset))
+    #         img = train_dataset[r]
+    #         #adding noise randomly
+    #         img_data = add_noise(img[0], std, mean, p).detach().numpy()
+    #         ax[i][j].set_title(img[1])
+    #         ax[i][j].imshow(img_data.squeeze())
+    #         ax[i][j].axis('off')
+    #         ax[i][j].axis('off')
 
-    for i in range(len(test_dataset)):
-        if i < len(test_dataset )//2:
-            noise_test_dataset[i][0] = gaussian_noise(test_dataset[i][0][0])
-        else:
-            noise_test_dataset[i][0] = speckle_noise(test_dataset[i][0][0])
+    # plt.show()
 
-    img = train_dataset[0][0][0]
-    plot_noised_img(img, plt)
-
-
+    ### Training
     print("Training")
-    train_set = MNIST_dataset(noise_train_dataset,train_dataset)
-    test_set = MNIST_dataset(noise_test_dataset,test_dataset)
-
-    train_loader = DataLoader(train_set,batch_size =batch_size,shuffle=True)
-    test_loader = DataLoader(test_set,batch_size =batch_size,shuffle=True)
-
-    img,label = iter(test_loader).next()
-    print(img.shape,label.shape)
-
-    torch.Size([128, 1, 28, 28])
-    torch.Size([128, 1, 28, 28])
-
     model = denoising_model()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -232,40 +220,27 @@ if __name__ == "__main__" :
     # Loss and optimizer
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
     schedular = optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
 
+    train_loss_tab = []
+    test_loss_tab  = []
+
     for epoch in range(num_epochs):
-        train(model, device, train_loader, criterion, optimizer, epoch)
+        _train_loss = train(model, device, train_loader, criterion, optimizer, epoch, std, mean)
         schedular.step()
-        test(model, device, test_loader)
-        if epoch % checkpoint == 0:
-            # Save Model
-            d = time.strftime("%Y,%m,%d,_%H,%M,%S")
-            t = d.split(',')
-            today = ''.join(t)
-            filename = f".\MODELS\Model_{today}_{epoch}_{num_epochs}.pth"
-            torch.save(model.state_dict(), filename)
+        _test_loss = test(model, device, test_loader, epoch, std, mean)
 
-    img, label = iter(train_loader).next()
-    img1 = img[0].view(img[0].shape[0], -1).float()
-    print(img1.shape)
-    predict = model(img1.to(device))
-    label = label[0][0].detach().numpy()
+        train_loss_tab.append(_train_loss)
+        #test_loss_tab.append(_test_loss)
 
-    torch.Size([1, 784])
+        # if epoch % checkpoint == 0:
+        #     # Save Model
+        #     d = time.strftime("%Y,%m,%d,_%H,%M,%S")
+        #     t = d.split(',')
+        #     today = ''.join(t)
+        #     filename = f".\MODELS\Model_{today}_{epoch}_{num_epochs}.pth"
+        #     torch.save(model.state_dict(), filename)
 
-    predict_img = predict.view(1, 28, 28).detach().cpu().numpy()
+    print(train_loss_tab)
 
-    plt.subplot(1, 3, 1)
-    plt.imshow(img[0][0], cmap="gray")
-    plt.title("Noisy Image")
-    plt.subplot(1, 3, 2)
-    plt.imshow(label, cmap="gray")
-    plt.title("Original Image")
-    plt.subplot(1, 3, 3)
-    plt.imshow(predict_img[0], cmap="gray")
-    plt.title("Predicted Image")
-
-    #plt.show()
 
