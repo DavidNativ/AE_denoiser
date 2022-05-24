@@ -31,7 +31,8 @@ def step_two_create_dataset(dataset_path, dataset_name, dataset_project):
     dataset.finalize(verbose=True)
     return dataset
 
-@PipelineDecorator.component(return_values=['train_loader', 'test_loader'], cache=False)
+@PipelineDecorator.component(
+    return_values=['train_loader', 'test_loader'], cache=False ) #, monitor_artifacts=['img',])
 def step_three_create_dataloaders(dataset, batch_size, dataset_path):
     from clearml import PipelineController
     from torchvision.datasets import MNIST
@@ -63,11 +64,14 @@ def step_three_create_dataloaders(dataset, batch_size, dataset_path):
     for (i, sample) in enumerate(test_loader):
         r = np.random.randint(batch_size)
         img = sample[0][r].view(28, 28).numpy()
-        img = pil.fromarray(img)
+        img = pil.fromarray((img*255).astype(np.uint8))
 
-        logger = PipelineController.get_logger()
-        logger.report_image(title="original MNIST", series=f"Clean Image No.{i}", image=img)
-        #PipelineController.upload_artifact('img', img)
+        #### no previews (artefacts)
+        #PipelineDecorator.upload_artifact(name=f'Clean Image No.{i}', artifact_object=img)
+
+        #### previews (debug samples)
+        #logger = PipelineController.get_logger()
+        #logger.report_image(title="original MNIST", series=f"Clean Image No.{i}", image=img)
 
         max += 1
         if max > 8:
@@ -79,7 +83,7 @@ def step_three_create_dataloaders(dataset, batch_size, dataset_path):
     name='MNIST Deco Pipeline', project='tuto', version='0.0.1',
     default_queue='default', pipeline_execution_queue='default'
 )
-def main():
+def pipeline():
     import argparse
 
     CLEARML = True
@@ -122,5 +126,5 @@ def main():
 if __name__ == "__main__":
     #PipelineDecorator.debug_pipeline()
     PipelineDecorator.run_locally()
-    main()
+    pipeline()
     print('pipeline completed')
